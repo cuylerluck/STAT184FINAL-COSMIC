@@ -1,0 +1,148 @@
+---
+title: "An Analysis of the COSMIC Database"
+author: "Cuyler Luck"
+date: "12/6/17"
+output: 
+  html_document:
+    fig_height: 3
+    fig_width: 5
+---
+<!-- Don't edit in between this line and the one below -->
+```{r include=FALSE}
+# Don't delete this chunk if you are using the DataComputing package
+library(DataComputing)
+library(tidyr)
+library(party)
+library(mosaic)
+```
+*Source file* 
+```{r, results='asis', echo=FALSE}
+includeSourceDocuments()
+```
+<!-- Don't edit the material above this line -->
+
+###Introduction
+
+In order to get cancer, an individual must acquire one or more mutations in their DNA. These mutations typically lead the cells where they occur to divide uncontrollably, resulting in a tumor and cancerous cells. A critical set of information in trying to cure cancer is understanding what these mutations are and where they occur -- as such, the Catalogue Of Somatic Mutations In Cancer (COSMIC) exists to keep track of somatic mutations and their characteristics. Here's a glimpse of the database (which holds records for over 5.8 million mutations):
+
+```{r}
+COSMIC=read.table(file="CosmicMutantExport.tsv",sep="\t",header=TRUE)
+head(COSMIC)
+```
+
+###Analysis
+
+There are a few pieces of information which would be nice to know about the most commonly occurring mutations, namely their types, the genes they are in, and the sites within the human body which they affect.
+
+#Mutation Type
+
+There are multiple possibilities for what a mutation could be. For instance, it may be a nonsense mutation, meaning that the mutation caused a stop codon to appear in the DNA, prematurely terminating the protein for the affected gene. The mutation may also be missense, indicating that the mutation changed a single amino acid in the gene. Insertions and deletions are also possible, where one or more base pairs in the DNA are added or removed, potentially shifting the entire gene out of frame (rendering it entirely useless) or simply adding/subtracting an entire codon from the gene. Silent mutations are those which have no effect on the gene -- they may cause a redundant amino acid change or they may not even be in a part of the DNA which is used for making proteins. Complex mutations may involve combinations of these different types of mutations. Let's see what the most common mutation types are...
+
+```{r,fig.height=8, fig.width=12}
+mutType<-COSMIC %>% group_by(Mutation.Description) %>% summarise(count=n()) %>% arrange(desc(count))
+mutType
+mutType<-mutType %>% mutate(Mutation.Description=reorder(Mutation.Description,-count))
+ggplot(mutType,aes(x=Mutation.Description,y=count))+geom_bar(stat="Identity")+theme(axis.text.x=element_text(angle=30,hjust=1))
+
+```
+
+Clearly missense mutations (single amino acid changes) are the most common type of mutations and substitution-type mutations completely dominate all other types. Insertions and deletions are the second most common class of mutations, with more complex mutations proving to be rather rare (as would be expected, since it's hard to get the right combination of mutations needed for these).
+
+
+#Affected Genes
+
+Each mutation lies in one gene, and we can get an idea about how important those genes are in cancer based on the number of cancerous mutations they harbor -- the more mutations a gene has, the more crucial that gene probably is in preventing cancer (hence why its breakage causes cancer). There are a lot of genes in this database, so let's only look at ones which have more than 10,000 mutations (i.e. show up in over 10,000 observations)...
+
+```{r,fig.height=8, fig.width=12}
+mutGene<-COSMIC %>% group_by(Gene.name) %>% summarise(count=n()) %>% filter(count>10000)
+mutGene<-mutGene %>% mutate(Gene.name=reorder(Gene.name,-count))
+ggplot(mutGene,aes(x=Gene.name,y=count))+geom_bar(stat="Identity")+theme(axis.text.x=element_text(angle=30,hjust=1))
+```
+
+The BRAF gene is the most commonly mutated gene in this data set, and this makes sense -- [according to the NCBI](https://ghr.nlm.nih.gov/gene/BRAF), the BRAF gene is involved in the RAS/MAPK signaling pathway which in turn regulates cell growth/division, movement, and death. So, it makes sense that mutations in this gene are so commonly implicated in cancer. Similarly, [investigation of the JAK2 gene](https://ghr.nlm.nih.gov/gene/JAK2) reveals that it contains the instructions for making a protein which promotes the proliferation of cells.
+
+#Mutation Sites
+
+The tissues in which these mutations occur are also of interest -- people may think that breast cancer is one of the most prevalent types of cancer because of its prominence in popular media, but this database will let us see what types of tissue contain the most mutations.
+
+```{r,fig.height=8, fig.width=12}
+mutLocation<-COSMIC %>% group_by(Primary.site) %>% summarise(count=n()) %>% arrange(desc(count)) %>% filter(count>=300000)
+mutLocation
+mutLocation<-mutLocation %>% mutate(Primary.site=reorder(Primary.site,-count))
+ggplot(mutLocation,aes(x=Primary.site,y=count))+geom_bar(stat="Identity")+theme(axis.text.x=element_text(angle=30,hjust=1))
+```
+
+The most mutations occur in the large intestine, and interestingly breast cancer doesn't even appear in the top 5 primary sites. This doesn't tell us much about the mutations themselves, but it's interesting to look at the tissues which commonly have cancerous mutations.
+
+###Interesting Info
+
+Outside of the three characteristics explored above, there are a few other things worth studying about this dataset. Let's start with determining how high quality the dataset is, before looking at how chromosome number plays into mutation occurence.
+
+#Confirmed Mutations
+
+Not all of the mutations in this sample are confirmed, so let's see how many are definitely legit.
+
+```{r}
+status<-COSMIC %>% group_by(Mutation.somatic.status) %>% summarise(count=n()) %>% arrange(desc(count))
+status
+```
+
+So, most of the mutations in this database are confirmed -- it seems like this is a pretty high quality source of data.
+
+#Does the Chromosome Matter?
+
+Another bit of information that may be interesting is the relevance of the chromosome number -- do mutations occur more often on some chromosomes than others? We would think no, since DNA mutations happen mostly at random and as such would be distributed evently across the entire human genome. However, human chromosomes are numbered according to their size, with chromosome 1 being the largest and chromosome 22 being the smallest, so although the ratio of mutations/chromosome size should be constant, there should be a negative correlation between the number of mutations and chromosome number. It's worth noting that this data set includes chromosomes 23, 24, and 25 (which don't really exist -- humans have chromosomes 1-22 and sex chromosomes). I'm guessing that 23/24 are the sex chromosomes but I have no idea what 25 might be, so I've removed it from this dataset.
+
+```{r,fig.height=8, fig.width=12}
+splitted=COSMIC %>% select(Mutation.genome.position) %>% separate(Mutation.genome.position,c("Chromosome_Number","Base_Pair_Location"),sep=":")
+splitted<-splitted %>% group_by(Chromosome_Number) %>% summarise(count=n()) %>% filter(Chromosome_Number!="") %>% filter(Chromosome_Number!=25) %>% mutate(Chromosome_Number=as.numeric(Chromosome_Number)) %>% arrange(Chromosome_Number)
+splitted
+ggplot(splitted,aes(x=Chromosome_Number,y=count))+geom_point()
+```
+
+So it appears that there is a negative correlation between the number of mutations and chromosome number. This makes sense since larger chromosomes contain more DNA that could be mutated, so they should have more mutations than their smaller counterparts. Let's see what the linear function for this data looks like:
+
+```{r,fig.height=8, fig.width=12}
+ggplot(splitted,aes(x=Chromosome_Number,y=count))+geom_point(alpha=.2)+stat_smooth(method=lm)
+cor(splitted$Chromosome_Number,splitted$count)
+
+```
+
+This looks like what we would expect, and there's a correlation coefficient of -0.6795571. Not great, but still showing us that a negative relationship exists. Now to check if the ratio of (number of mutations)/(gene length) is roughly equivalent for all chromosomes. I'm going to add the total sizes of each chromosome in base pairs to the data frame using data from the [NCBI](https://www.ncbi.nlm.nih.gov/grc/human/data).
+
+```{r,fig.height=8, fig.width=12}
+splitted$length<-c(248956422,242193529,198295559,190214555,181538259,170805979,159345973,145138636,138394717,133797422,135086622,133275309,114364328,107043718,101991189,90338345,83257441,80373285,58617616,64444167,46709983,50818468,156040895,57227415)
+splitted<-splitted %>% mutate("ratio"=count/length)
+ggplot(splitted,aes(x=Chromosome_Number,y=ratio))+geom_point()
+```
+
+Indeed, it appears that the number of mutations in each chromosome is pretty standard when normalized with the length of the gene, with the average rate of mutations falling around 0.002 mutations per base pair. It's worth noting that there appear to be two outliers (chromosomes 17 and 19), but that's not too bad for a set of 24 chromosomes.
+
+#Bringing it all Together
+
+As a final analysis, let's look at whether or not different chromosomes encounter some types of mutations more often than others. We've already look at the most common mutation types and the chromosomes with the most mutations, so let's just limit ourselves to the five most common mutation types and the five chromosomes with the most mutations, so we can ensure that we aren't faceting into 24 different graphs or anything.
+
+```{r}
+chosenMut<-mutType %>% filter(count>100000) %>% select(Mutation.Description)
+chosenChrom<-splitted %>% filter(count>330000) %>% select(Chromosome_Number)
+chosenMut
+chosenChrom
+pattern="Substitution" #this is okay because all of the substitution types are in the top 5 mutation types
+chosenCOSMIC<-COSMIC %>% filter(grepl(pattern,Mutation.Description) | Mutation.Description=="Unknown" | Mutation.Description=="Deletion - Frameshift") %>% separate(Mutation.genome.position,c("Chromosome_Number","Base_Pair_Location"),sep=":") %>%  filter(Chromosome_Number==1|Chromosome_Number==2|Chromosome_Number==3|Chromosome_Number==12|Chromosome_Number==19) %>% group_by(Mutation.Description,Chromosome_Number) %>% summarise(count=n())
+```
+
+Now let's check out how the distribution of mutation types checks out across the different chromosomes...
+
+```{r,fig.height=8, fig.width=12}
+ggplot(chosenCOSMIC,aes(x=Mutation.Description,y=count))+geom_bar(stat="Identity")+facet_wrap(~Chromosome_Number)+theme(axis.text.x=element_text(angle=90,hjust=1))
+```
+
+It appears that the distribution of mutation types doesn't vary much across different chromosomes. This makes sense, as we wouldn't expect one chromosome to have unique, odd characteristics which attract some kind of mutation more than others.
+
+###Conclusion
+
+The COSMIC database is important in cancer biology, and it's clear why -- this is just one available set of data from the repository, and it alone holds a remarkable amount of information pertaining to cancer mutations and their characteristics. We've learned that substitution mutations are the most predominant type of cancer-related mutations, and that genes which are commonly mutated in cancer have to do with cell proliferation. We were also able to look at which types of tissue contain the most cancerous mutations, finding that the large intestine wins out in this category (although the media would probably have you believe that breast cancer would be at the top). The quality of this dataset was confirmed to be high thanks to the preponderance of confirmed samples, and it was found that these mutations are relatively evenly spread throughout all of our chromosomes. As a final look, we showed that the distribution of mutation type doesn't change much across different chromosomes.
+
+As a final bit of perspective, I want to point out that cancer is really a phenomenon of statistics. I mean this beyond just this analysis -- cancer can occur when our cells make errors while replicating DNA. This is incredibly rare because the enzymes which replicate our DNA are extremely accurate (1 in 10,000 base pairs will be incorrect), and there are redundant error-checking proteins which fix even those rare mistakes. Beyond this, even when mistakes ARE made, they may fall into any of the massive non-coding portions of our DNA which don't really make anything in our cells (98.8% of our DNA is non-coding). Even if the mutations occur in genes which actually make proteins, they may be silent (i.e. they do not change the amino acid produced) or they may not be drastic enough to change all of the functions which the protein carries out. It is only if a mutation somehow slips through all of these cracks that it may negatively affect a crucial protein, causing cancer. Since our cells are constantly dividing (and they will be as long as we live), this incredibly rare event becomes more likely to have occurred as we age. Every second there's a possibility that our cells will mess up and we will acquire a cancerous mutation, it's just that the event is so rare that it almost never happens. As we get older, one mutation will almost definitely slip through eventually -- it's all up to probability.
+
+Cancer is just a phenomenon of statistics, which is why it's so hard for scientists to defeat it. Analyses like this one are our way forward to learning how to beat cancer, and I take pride in being able to say I've contributed (I also worked for MD Anderson Cancer Center last summer). Thank you for teaching me how to use R -- I hope to be able to take it to my future research endeavors as humanity attempts to conquer diseases like cancer.
